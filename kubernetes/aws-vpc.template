@@ -1,0 +1,1025 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template creates a Multi-AZ, multi-subnet VPC infrastructure with
+  managed NAT gateways in the public subnet for each Availability Zone. You can also
+  create additional private subnets with dedicated custom network access control lists
+  (ACLs). **WARNING** This template creates AWS resources.
+  You will be billed for the AWS resources used if you create a stack from this template.
+  QS(0027).
+  20180410
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Availability Zone Configuration
+        Parameters:
+          - AvailabilityZones
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VPCCidr
+          - SubnetPublicCidrA
+          - SubnetPublicCidrB
+          - SubnetPublicCidrC
+          - SubnetPrivateCidrA
+          - SubnetPrivateCidrB
+          - SubnetPrivateCidrC
+          - SubnetRdsCidrA
+          - SubnetRdsCidrB
+          - SubnetRdsCidrC
+          - VPCTenancy
+      - Label:
+          default: Amazon EC2 Configuration
+        Parameters:
+          - KeyPairName
+      - Label:
+          default: 'Flow Logs Parameters'
+        Parameters:
+        - RetentionInDays
+        - TrafficType
+    ParameterLabels:
+      AvailabilityZones:
+        default: Availability Zones
+      CreateAdditionalPrivateSubnets:
+        default: Create additional private subnets with dedicated network ACLs
+      KeyPairName:
+        default: Key pair name
+      SubnetPublicCidrA:
+        default: PUBLIC subnet A CIDR
+      SubnetPublicCidrB:
+        default: PUBLIC subnet B CIDR
+      SubnetPublicCidrC:
+        default: PUBLIC subnet C CIDR
+      SubnetPrivateCidrA:
+        default: PRIVATE subnet A CIDR
+      SubnetPrivateCidrB:
+        default: PRIVATE subnet B CIDR
+      SubnetPrivateCidrC:
+        default: PRIVATE subnet C CIDR
+      SubnetRdsCidrA:
+        default: RDS PRIVATE subnet A CIDR
+      SubnetRdsCidrB:
+        default: RDS PRIVATE subnet B CIDR
+      SubnetRdsCidrC:
+        default: RDS PRIVATE subnet C CIDR
+      VPCCidr:
+        default: VPC CIDR
+      VPCTenancy:
+        default: VPC Tenancy
+
+Parameters:
+  AvailabilityZones:
+    Description: 'List of Availability Zones to use for the subnets in the VPC. Note:
+      The logical order is preserved.'
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+  KeyPairName:
+    Description: Public/private key pairs allow you to securely connect to your NAT
+      instance after it launches. This is used only if the region does not support
+      NAT gateways.
+    Type: AWS::EC2::KeyPair::KeyName
+  VPCCidr:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+    Type: String
+  VPCTenancy:
+    AllowedValues:
+      - default
+      - dedicated
+    Default: default
+    Description: The allowed tenancy of instances launched into the VPC
+    Type: String
+  SubnetPublicCidrA:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.128.0/20
+    Description: CIDR block for the Public DMZ subnet A located in Availability Zone A
+    Type: String
+  SubnetPublicCidrB:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.144.0/20
+    Description: CIDR block for the Public DMZ subnet B located in Availability Zone B
+    Type: String
+  SubnetPublicCidrC:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.160.0/20
+    Description: CIDR block for the Public DMZ subnet C located in Availability Zone C
+    Type: String
+  SubnetPrivateCidrA:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.0.0/19
+    Description: CIDR block for Private subnet A located in Availability Zone A
+    Type: String
+  SubnetPrivateCidrB:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.32.0/19
+    Description: CIDR block for Private subnet B located in Availability Zone B
+    Type: String
+  SubnetPrivateCidrC:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.64.0/19
+    Description: CIDR block for Private subnet C located in Availability Zone C
+    Type: String
+  SubnetRdsCidrA:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.192.0/21
+    Description: CIDR block for RDS Private Subnet A with dedicated network ACL located in Availability Zone A
+    Type: String
+  SubnetRdsCidrB:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.200.0/21
+    Description: CIDR block for RDS Private subnet B with dedicated network ACL located in Availability Zone B
+    Type: String
+  SubnetRdsCidrC:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.208.0/21
+    Description: CIDR block for RDS Private subnet C with dedicated network ACL located in Availability Zone C
+    Type: String
+  RetentionInDays:
+    Description: 'Specifies the number of days you want to retain log events.'
+    Type: Number
+    Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+  TrafficType:
+    Description: 'The type of traffic to log.'
+    Type: String
+    Default: REJECT
+    AllowedValues:
+    - ACCEPT
+    - REJECT
+    - ALL
+
+############
+# Mappings #
+############
+Mappings:
+  AWSAMIRegionMap:
+    AMI:         
+      AWSNATHVM: ami-59054720							# amzn-ami-vpc-nat-hvm-2017.09.1.20180307-x86_64-ebs
+    us-gov-west-1:
+      AWSNATHVM: ami-3f0a8f5e
+
+
+Conditions:
+  GovCloudCondition: !Equals [!Ref 'AWS::Region', us-gov-west-1]
+  NATInstanceCondition: !Condition 'GovCloudCondition'
+  NATGatewayCondition: !Not [!Condition 'GovCloudCondition']
+
+#############
+# Resources #
+#############
+Resources:
+  #################
+  # VPC Flow Logs #
+  #################
+  Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'vpc-flow-logs.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: 'flowlogs-policy'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            - 'logs:DescribeLogGroups'
+            - 'logs:DescribeLogStreams'
+            Resource: '*'
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: !Ref RetentionInDays
+  FlowLog:
+    Type: 'AWS::EC2::FlowLog'
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt 'Role.Arn'
+      LogGroupName: !Ref LogGroup
+      ResourceId: !Ref 'VPC'
+      ResourceType: 'VPC'
+      TrafficType: !Ref TrafficType
+
+  ############
+  # VPC DHCP #
+  ############
+  DHCPOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: !Join ['', [!Ref 'AWS::Region', .compute.internal]]
+      DomainNameServers: 
+        - AmazonProvidedDNS
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref 'VPCCidr'
+      InstanceTenancy: !Ref 'VPCTenancy'
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: !Ref 'AWS::StackName'
+  VPCDHCPOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      VpcId: !Ref 'VPC'
+      DhcpOptionsId: !Ref 'DHCPOptions'
+
+  ############
+  # Gateways #
+  ############
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref 'AWS::StackName'
+        - Key: Network
+          Value: Public
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'VPC'
+      InternetGatewayId: !Ref 'InternetGateway'
+
+  ##################
+  # Public Subnets #
+  ##################
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPublicCidrA'
+      AvailabilityZone: !Select ['0', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-A
+        - Key: Network
+          Value: Public
+      MapPublicIpOnLaunch: true
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPublicCidrB'
+      AvailabilityZone: !Select ['1', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-B
+        - Key: Network
+          Value: Public
+      MapPublicIpOnLaunch: true
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPublicCidrC'
+      AvailabilityZone: !Select ['2', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-C
+        - Key: Network
+          Value: Public
+      MapPublicIpOnLaunch: true
+
+  ###################
+  # Private Subnets #
+  ###################
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPrivateCidrA'
+      AvailabilityZone: !Select ['0', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-A
+        - Key: Network
+          Value: Private
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPrivateCidrB'
+      AvailabilityZone: !Select ['1', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-B
+        - Key: Network
+          Value: Private
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetPrivateCidrC'
+      AvailabilityZone: !Select ['2', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-C
+        - Key: Network
+          Value: Private
+
+  ###############
+  # RDS Subnets #
+  ###############
+  RDSSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetRdsCidrA'
+      AvailabilityZone: !Select ['0', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-A
+        - Key: Network
+          Value: RDS Private
+  RDSSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetRdsCidrB'
+      AvailabilityZone: !Select ['1', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-B
+        - Key: Network
+          Value: RDS Private
+  RDSSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'VPC'
+      CidrBlock: !Ref 'SubnetRdsCidrC'
+      AvailabilityZone: !Select ['2', !Ref 'AvailabilityZones']
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-C
+        - Key: Network
+          Value: RDS Private
+
+
+
+  ########################
+  # Subnet Routing Table #
+  ########################
+  
+  ######################
+  # Public Route Table #
+  ######################
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Public-Subnets
+        - Key: Network
+          Value: Public
+  PublicSubnetRoute:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref 'PublicSubnetRouteTable'
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref 'InternetGateway'
+  PublicSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PublicSubnetA'
+      RouteTableId: !Ref 'PublicSubnetRouteTable'
+  PublicSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PublicSubnetB'
+      RouteTableId: !Ref 'PublicSubnetRouteTable'
+  PublicSubnetRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PublicSubnetC'
+      RouteTableId: !Ref 'PublicSubnetRouteTable'
+
+  #########################
+  # PRIVATE A Route Table #
+  #########################
+  PrivateSubnetRouteTableA:    
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-Route-Table-A
+        - Key: Network
+          Value: Private
+  PrivateSubnetRouteA:    
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref 'PrivateSubnetRouteTableA'
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref 'NATGatewayA'
+  PrivateSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetA'
+      RouteTableId: !Ref 'PrivateSubnetRouteTableA'
+
+  #########################
+  # PRIVATE B Route Table #
+  #########################
+  PrivateSubnetRouteTableB:    
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-Route-Table-B
+        - Key: Network
+          Value: Private
+  PrivateSubnetRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref 'PrivateSubnetRouteTableB'
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref 'NATGatewayB'
+  PrivateSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetB'
+      RouteTableId: !Ref 'PrivateSubnetRouteTableB'
+
+  #########################
+  # PRIVATE C Route Table #
+  #########################
+  PrivateSubnetRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-Subnet-Route-Table-C
+        - Key: Network
+          Value: Private
+  PrivateSubnetRouteC:    
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref 'PrivateSubnetRouteTableC'
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref 'NATGatewayC'
+  PrivateSubnetRouteTableAssociationC:    
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetC'
+      RouteTableId: !Ref 'PrivateSubnetRouteTableC'
+
+
+  #########
+  # NACLS #
+  #########
+  ##################
+  # PRIVATE A NACL #
+  ##################
+  PrivateSubnetNetworkAclA:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-NACL-Protected-Subnet-A
+        - Key: Network
+          Value: Private-NACL-Protected
+  PrivateSubnetNetworkAclEntryInboundA:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclA'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclEntryOutboundA:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclA'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclAssociationA:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetA'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclA'
+
+  ##################
+  # PRIVATE B NACL #
+  ##################
+  PrivateSubnetNetworkAclB:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-NACL-Protected-Subnet-B
+        - Key: Network
+          Value: Private-NACL-Protected
+  PrivateSubnetNetworkAclEntryInboundB:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclB'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclEntryOutboundB:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclB'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclAssociationB:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetB'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclB'
+
+  ##################
+  # PRIVATE C NACL #
+  ##################
+  PrivateSubnetNetworkAclC:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: Private-NACL-Protected-Subnet-C
+        - Key: Network
+          Value: Private-NACL-Protected
+  PrivateSubnetNetworkAclEntryInboundC:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclC'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclEntryOutboundC:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclC'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  PrivateSubnetNetworkAclAssociationC:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'PrivateSubnetC'
+      NetworkAclId: !Ref 'PrivateSubnetNetworkAclC'
+
+
+
+  #####################
+  # RDS A Route Table #
+  #####################
+  RDSSubnetRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-A
+        - Key: Network
+          Value: RDS Private
+# Keep for future VPN/AWS Direct Connect Routing
+  # RDSSubnetRouteA:
+    # Type: AWS::EC2::Route
+    # Properties:
+      # RouteTableId: !Ref 'RDSSubnetRouteTableA'
+      # DestinationCidrBlock: 0.0.0.0/0
+      # NatGatewayId: !Ref 'NATGatewayA'
+  RDSSubnetRouteTableAssociationA:    
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetA'
+      RouteTableId: !Ref 'RDSSubnetRouteTableA'
+  ##############
+  # RDS A NACL #
+  ##############
+  RDSSubnetNetworkAclA:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Private-NACL-Protected-Subnet-A
+        - Key: Network
+          Value: RDS-Private-NACL-Protected
+  RDSSubnetNetworkAclEntryInboundA:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclA'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclEntryOutboundA:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclA'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclAssociationA:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetA'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclA'
+
+
+  #####################
+  # RDS B Route Table #
+  #####################
+  RDSSubnetRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-B
+        - Key: Network
+          Value: RDS Private
+# Keep for future VPN/AWS Direct Connect Routing
+  # RDSSubnetRouteB:
+    # Type: AWS::EC2::Route
+    # Properties:
+      # RouteTableId: !Ref 'RDSSubnetRouteTableB'
+      # DestinationCidrBlock: 0.0.0.0/0
+      # NatGatewayId: !Ref 'NATGatewayB'
+  RDSSubnetRouteTableBAssociation:    
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetB'
+      RouteTableId: !Ref 'RDSSubnetRouteTableB'
+  ##############
+  # RDS B NACL #
+  ##############
+  RDSSubnetNetworkAclB:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Private-NACL-Protected-Subnet-B
+        - Key: Network
+          Value: RDS-Private-NACL-Protected
+  RDSSubnetNetworkAclEntryInboundB:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclB'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclEntryOutboundB:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclB'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclAssociationB:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetB'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclB'
+
+  #########
+  # RDS C #
+  #########
+  RDSSubnetRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Subnet-C
+        - Key: Network
+          Value: RDS Private
+# Keep for future VPN/AWS Direct Connect Routing
+  # RDSSubnetRouteC:
+    # Type: AWS::EC2::Route
+    # Properties:
+      # RouteTableId: !Ref 'RDSSubnetRouteTableC'
+      # DestinationCidrBlock: 0.0.0.0/0
+      # NatGatewayId: !Ref 'NATGatewayC'
+  RDSSubnetRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetC'
+      RouteTableId: !Ref 'RDSSubnetRouteTableC'
+  ##############
+  # RDS C NACL #
+  ##############
+  RDSSubnetNetworkAclC:    
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: RDS-Private-NACL-Protected-Subnet-C
+        - Key: Network
+          Value: RDS-Private-NACL-Protected
+  RDSSubnetNetworkAclEntryInboundC:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclC'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclEntryOutboundC:    
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclC'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+  RDSSubnetNetworkAclAssociationC:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref 'RDSSubnetC'
+      NetworkAclId: !Ref 'RDSSubnetNetworkAclC'
+
+
+  ###########################
+  # NAT Gateway Elastic IPs #
+  ###########################
+  NATEIPA:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NATEIPB:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NATEIPC:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+
+
+  ###############
+  # NAT Gateway #
+  ###############
+  NATGatewayA:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NATEIPA.AllocationId'
+      SubnetId: !Ref 'PublicSubnetA'
+  NATGatewayB:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NATEIPB.AllocationId'
+      SubnetId: !Ref 'PublicSubnetB'
+  NATGatewayC:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NATEIPC.AllocationId'
+      SubnetId: !Ref 'PublicSubnetC'
+ 
+  NATInstanceSecurityGroup:    
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enables outbound internet access for the VPC via the NAT instances
+      VpcId: !Ref 'VPC'
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '1'
+          ToPort: '65535'
+          CidrIp: !Ref 'VPCCidr'
+
+  ###################
+  # S3 VPC EndPoint #
+  ###################
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: '*'
+            Effect: Allow
+            Resource: '*'
+            Principal: '*'
+      RouteTableIds:
+        - !Ref 'PrivateSubnetRouteTableA'
+        - !Ref 'PrivateSubnetRouteTableB'
+        - !Ref 'PrivateSubnetRouteTableC'
+      ServiceName: !Join ['', [com.amazonaws., !Ref 'AWS::Region', .s3]]
+      VpcId: !Ref 'VPC'
+
+  #########################
+  # DynamoDB VPC EndPoint #
+  #########################
+  DDBVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: '*'
+            Effect: Allow
+            Resource: '*'
+            Principal: '*'
+      RouteTableIds:
+        - !Ref 'PrivateSubnetRouteTableA'
+        - !Ref 'PrivateSubnetRouteTableB'
+        - !Ref 'PrivateSubnetRouteTableC'        
+      ServiceName: !Join ['', [com.amazonaws., !Ref 'AWS::Region', .dynamodb]]
+      VpcId: !Ref 'VPC'
+
+###########
+# Outputs #
+###########
+Outputs:
+  VPCFlowLogGroupName:
+    Description: 'The name of the CloudWatch Logs log group where Amazon EC2 publishes your flow logs'
+    Value: !Ref LogGroup
+  VPCFlowLogGroupARN:
+    Description: 'The ARN of the CloudWatch Logs log group where Amazon EC2 publishes your flow logs'
+    Value: !GetAtt 'LogGroup.Arn'
+  VPCStackName:
+    Description: 'VPC Stack Name'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}'
+  VPCCidr:
+    Value: !Ref 'VPCCidr'
+    Description: VPC CIDR
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCCidr'
+  VPCID:
+    Value: !Ref 'VPC'
+    Description: VPC ID
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCID'
+
+  NATEIPA:
+    Description: NAT IP address in Availability Zone A
+    Value: !Ref 'NATEIPA'
+    Export:
+      Name: !Sub '${AWS::StackName}-NATEIPA'
+  NATEIPB: 
+    Description: NAT IP address in Availability Zone B
+    Value: !Ref 'NATEIPB'
+    Export:
+      Name: !Sub '${AWS::StackName}-NATEIPB'
+  NATEIPC:   
+    Description: NAT IP address in Availability Zone C
+    Value: !Ref 'NATEIPC'
+    Export:
+      Name: !Sub '${AWS::StackName}-NATEIPC'
+
+  PublicSubnetIdA:
+    Description: Public Subnet A ID in Availability Zone A
+    Value: !Ref 'PublicSubnetA'
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetIdA'
+  PublicSubnetIdB:
+    Description: Public Subnet B ID in Availability Zone B
+    Value: !Ref 'PublicSubnetB'
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetIdB'
+  PublicSubnetIdC:    
+    Description: Public Subnet C ID in Availability Zone C
+    Value: !Ref 'PublicSubnetC'
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetIdC'
+
+  PrivateSubnetIdA:
+    Description: Private Subnet A ID in Availability Zone A
+    Value: !Ref 'PrivateSubnetA'
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetIdA'
+  PrivateSubnetIdB:
+    Description: Private Subnet B ID in Availability Zone B
+    Value: !Ref 'PrivateSubnetB'
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetIdB'
+  PrivateSubnetIdC:
+    Description: Private Subnet C ID in Availability Zone C
+    Value: !Ref 'PrivateSubnetC'
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetIdC'
+
+
+  RDSSubnetIdA:
+    Description: RDS Subnet A ID in Availability Zone A
+    Value: !Ref 'RDSSubnetA'
+    Export:
+      Name: !Sub '${AWS::StackName}-RDSSubnetIdA'
+  RDSSubnetIdB:
+    Description: RDS Subnet B ID in Availability Zone B
+    Value: !Ref 'RDSSubnetB'
+    Export:
+      Name: !Sub '${AWS::StackName}-RDSSubnetIdB'
+  RDSSubnetIdC:
+    Description: RDS Subnet C ID in Availability Zone C
+    Value: !Ref 'RDSSubnetC'
+    Export:
+      Name: !Sub '${AWS::StackName}-RDSSubnetIdC'
+
+  SubnetRdsCidrA:
+    Description: RDS Subnet A CIDR in Availability Zone A
+    Value: !Ref 'SubnetRdsCidrA'
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetRdsCidrA'
+  SubnetRdsCidrB:
+    Description: RDS Subnet B CIDR in Availability Zone B
+    Value: !Ref 'SubnetRdsCidrB'
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetRdsCidrB'
+  SubnetRdsCidrC:
+    Description: RDS Subnet C CIDR in Availability Zone C
+    Value: !Ref 'SubnetRdsCidrC'
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetRdsCidrC'
+
+  PublicSubnetRouteTable:
+    Value: !Ref 'PublicSubnetRouteTable'
+    Description: Public Subnet Route Table
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetRouteTable'
+
+
+ 
+  S3VPCEndpoint:
+    Description: S3 VPC Endpoint
+    Value: !Ref 'S3VPCEndpoint'
+    Export:
+      Name: !Sub '${AWS::StackName}-S3VPCEndpoint'
+
+  DDBVPCEndpoint:
+    Description: DynamoDB VPC Endpoint
+    Value: !Ref 'DDBVPCEndpoint'
+    Export:
+      Name: !Sub '${AWS::StackName}-DDBVPCEndpoint'
+
+
+  ################################
+  # PRIVATE Subnet Routing Table #
+  ################################
+  PrivateSubnetRouteTableA:    
+    Value: !Ref 'PrivateSubnetRouteTableA'
+    Description: Private Subnet Route table in Availability Zone A
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetRouteTableA'
+  PrivateSubnetRouteTableB:
+    Value: !Ref 'PrivateSubnetRouteTableB'
+    Description: Private Subnet Route table in Availability Zone B
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetRouteTableB'
+  PrivateSubnetRouteTableC:    
+    Value: !Ref 'PrivateSubnetRouteTableC'
+    Description: Private Subnet Route table in Availability Zone C
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetRouteTableC'
+
